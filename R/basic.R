@@ -18,27 +18,91 @@ token <- create_token(app = app_name,
                       access_secret = access_token_secret)
 
 
-db <- check_db()
-
 interests <- tribble(
-  ~insterst_name, ~query, ~type,
-  "epi & ds", 'epidemiology "data science"', "tweets",
-  #"rstats", "#rstats", "tweets",
-  "dq", 'journal data quality', "tweets",
-  "ije", "IJEeditorial", "user",
-  "AmJEpi", "AmJEpi", "user",
-  "JClinEpi", "JClinEpi", "user"
+  ~interest_name, ~query, ~type,
+  #"epi & ds", "epidemiology 'data science'", "tweets",
+  "rstats", "#rstats", "tweets",
+  #"dq", 'journal data quality', "tweets",
+  #"ije", "IJEeditorial", "user",
+  #"AmJEpi", "AmJEpi", "user",
+  #"JClinEpi", "JClinEpi", "user"
 )
 
-data <- interests %>% 
-  mutate(twitter = case_when(type == "tweets" ~ map(query, search_tweets, n = 1, include_rts = FALSE),
-                             type == "user" ~ map(query, get_timeline, n = 1),
-                             TRUE ~ list("NA"))) %>% 
-  unnest_wider(twitter)
+get_recent_tweet <- function(interest_name, query, type) {
+  print(paste0("Fetching: ", interest_name))
+  
+  if (type == "tweets") {
+    rec <- search_tweets(query, n = 1, include_rts = FALSE)
+  }
+  if (type == "user") {
+    rec <- get_timeline(query, n = 1)
+  }
+   rec <- rec %>% 
+     mutate(interest_name = interest_name) %>% 
+     select(interest_name, everything())
+  
+  return(rec)
+}
 
-db <- check_db()
-db <- db %>% 
-  bind_rows(data)
+
+k <- 50
+while (k != 0) {
+  print(k)
+  
+  data <- NULL
+  for (i in 1:nrow(interests)) {
+    data[[i]] <- get_recent_tweet(pull(interests[i, 1]),
+                                  pull(interests[i, 2]),
+                                  pull(interests[i, 3]))
+  }
+  data <- data %>% 
+    bind_rows()
+  
+  
+  db <- check_db()
+  #### check if new
+  
+  
+  if (nrow(db) != 0) {
+    new <- db %>%
+      select(one_of("interest_name", "user_id", "status_id", "screen_name")) %>%
+      anti_join(
+        data %>%
+          select(interest_name, user_id, status_id, screen_name))
+    found <- nrow(new)
+    
+    if (found != 0) {
+      paste0(
+        "https://twitter.com/", 
+        new$screen_name, 
+        "/status/", 
+        new$status_id
+      ) %>% 
+        browseURL()
+    }
+    
+  }
+  
+  db <- db %>% 
+    bind_rows(data) %>% 
+    distinct(across(status_id), .keep_all = TRUE)
+  
+  print("saving")
+  
+  saveRDS(db, file = "data/db.rds")
+  k <- k - 1
+}
+
+
+
+post_tweet("fetching #rstats")
+
+
+db %>% 
+  select(interest_name, user_id, status_id, text) %>% 
+  group_split(interest_name) %>% 
+  map(distinct)
+
 
 db %>% 
   add_count(status_id) %>% select(n) %>% 
