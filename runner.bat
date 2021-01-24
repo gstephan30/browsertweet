@@ -1,4 +1,4 @@
 :loop
 Rscript R/basic.R
-timeout 5
+timeout 60
 goto loop
